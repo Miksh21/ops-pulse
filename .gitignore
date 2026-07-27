@@ -1,0 +1,14 @@
+node_modules
+.next
+out
+.env
+.env.local
+.env*.local
+.vercel
+*.tsbuildinfo
+next-env.d.ts
+.DS_Store
+.env*
+
+# real agent inventory: what is monitored stays local
+scripts/seed.local.mjs
