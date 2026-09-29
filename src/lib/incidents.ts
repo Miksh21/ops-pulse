@@ -1,7 +1,7 @@
 import { query } from "./db";
 import { BUCKET_MINUTES } from "./buckets";
 import { publish } from "./ntfy";
-import { lastDue } from "./schedule";
+import { lastAwakeDue, lastDue } from "./schedule";
 import type { Agent, ProbeResult } from "./types";
 
 /**
@@ -103,15 +103,33 @@ export async function evaluateIncidents(
     if (result.ping_ok) close.push({ agentId: agent.id, kind: "down" });
   }
 
-  const scheduled = await query<Pick<Agent, "id" | "schedule_cron" | "schedule_tz" | "grace_min" | "last_signal_at">>(
-    `select id, schedule_cron, schedule_tz, grace_min, last_signal_at
+  const scheduled = await query<
+    Pick<Agent, "id" | "schedule_cron" | "schedule_tz" | "grace_min" | "last_signal_at" | "config">
+  >(
+    `select id, schedule_cron, schedule_tz, grace_min, last_signal_at, config
        from ops.agents
       where kind = 'push' and not paused and schedule_cron is not null`
   );
+  // A job on a laptop (config.host) is judged by the minutes its host was
+  // awake, which the host's own heartbeat agent "<host>-awake" marks per bucket.
+  const hostOf = (a: { config: Record<string, unknown> }) =>
+    typeof a.config?.host === "string" ? a.config.host : null;
+  const awake = new Map<string, number[]>();
+  for (const host of new Set(scheduled.map(hostOf).filter((h): h is string => h !== null))) {
+    const rows = await query<{ bucket: string | Date }>(
+      `select t.bucket from ops.ticks t join ops.agents h on h.id = t.agent_id
+        where h.slug = $1 and t.ping_ok and t.bucket > now() - interval '9 days'`,
+      [`${host}-awake`]
+    );
+    awake.set(host, rows.map((r) => new Date(r.bucket).getTime()));
+  }
   for (const a of scheduled) {
+    const host = hostOf(a);
     let due: Date | null;
     try {
-      due = lastDue(a.schedule_cron ?? "", a.schedule_tz, new Date(now - a.grace_min * 60_000));
+      due = host
+        ? lastAwakeDue(a.schedule_cron ?? "", a.schedule_tz, a.grace_min, awake.get(host) ?? [], new Date(now))
+        : lastDue(a.schedule_cron ?? "", a.schedule_tz, new Date(now - a.grace_min * 60_000));
     } catch (err) {
       // An unreadable schedule is monitoring that is silently off: say so.
       const why = err instanceof Error ? err.message : String(err);

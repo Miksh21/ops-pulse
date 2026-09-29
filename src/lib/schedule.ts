@@ -72,3 +72,32 @@ export function lastDue(cron: string, tz: string, now: Date): Date | null {
   }
   return null;
 }
+
+/**
+ * For a job on a machine that sleeps (a laptop): the latest due run that its
+ * host has since been awake for at least `graceMin` minutes. `awake` holds the
+ * start times (ms) of the 5-minute buckets the host reported itself awake in.
+ * A run the host slept through is not held against the job until the host has
+ * been up long enough to catch it up. null when no due run inside 8 days qualifies.
+ */
+export function lastAwakeDue(
+  cron: string,
+  tz: string,
+  graceMin: number,
+  awake: number[],
+  now: Date,
+  bucketMin = 5
+): Date | null {
+  const floor = now.getTime() - WINDOW_MINUTES * 60_000;
+  let t = now;
+  for (let i = 0; i < 64; i++) {
+    const due = lastDue(cron, tz, t);
+    if (!due || due.getTime() < floor) return null;
+    // A bucket counts once it ends after the due minute.
+    const from = due.getTime() - bucketMin * 60_000;
+    const awakeMin = awake.filter((b) => b > from && b <= now.getTime()).length * bucketMin;
+    if (awakeMin >= graceMin) return due;
+    t = new Date(due.getTime() - 60_000);
+  }
+  return null;
+}

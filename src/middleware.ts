@@ -13,8 +13,14 @@ import { NextResponse, type NextRequest } from "next/server";
  *   /api/ping/*     the URL token IS the credential, and monitored jobs cannot
  *                   hold a browser cookie
  *   /api/incidents  carries its own OPS_DISPATCH_SECRET (external dispatcher)
+ *   /api/push/*     carries a client's bearer token (ops.client_tokens)
  */
-const OPEN_PATHS = [/^\/api\/tick(?:\/|$)/, /^\/api\/ping\//, /^\/api\/incidents(?:\/|$)/];
+const OPEN_PATHS = [
+  /^\/api\/tick(?:\/|$)/,
+  /^\/api\/ping\//,
+  /^\/api\/push\//,
+  /^\/api\/incidents(?:\/|$)/,
+];
 
 const COOKIE = "ops_key";
 

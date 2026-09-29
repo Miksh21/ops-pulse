@@ -1,7 +1,7 @@
 // Self-check for src/lib/schedule.ts. Run:
 //   node --experimental-strip-types scripts/check-schedule.ts
 import assert from "node:assert/strict";
-import { lastDue } from "../src/lib/schedule.ts";
+import { lastAwakeDue, lastDue } from "../src/lib/schedule.ts";
 
 const due = (cron: string, tz: string, now: string) =>
   lastDue(cron, tz, new Date(now))?.toISOString() ?? null;
@@ -34,5 +34,24 @@ assert.equal(due("0 0 1 1 *", "UTC", "2026-09-29T00:00:00Z"), null);
 assert.throws(() => lastDue("61 * * * *", "UTC", new Date()));
 assert.throws(() => lastDue("* * * *", "UTC", new Date()));
 assert.throws(() => lastDue("* * * * *", "Mars/Olympus", new Date()));
+
+// A laptop job is judged by awake minutes. Collector "*/30 9-17 * * 1-5",
+// grace 90; the Pro was awake 09:00-17:02 and again from 19:22 (Prague, 2026-09-29).
+const at = (s: string) => Date.parse(s);
+const bucketsBetween = (from: string, to: string) => {
+  const out: number[] = [];
+  for (let t = at(from); t < at(to); t += 5 * 60_000) out.push(t);
+  return out;
+};
+const pro = [...bucketsBetween("2026-09-29T07:00:00Z", "2026-09-29T15:05:00Z"), ...bucketsBetween("2026-09-29T17:20:00Z", "2026-09-29T17:30:00Z")];
+const awakeDue = (now: string, awake = pro) =>
+  lastAwakeDue("*/30 9-17 * * 1-5", "Europe/Prague", 90, awake, new Date(now))?.toISOString() ?? null;
+// 19:25 Prague, three minutes after wake: 17:30 and 17:00 had no awake time to
+// run in, so the run judged is 15:30, which the 16:58 signal covers: not late.
+assert.equal(awakeDue("2026-09-29T17:25:00Z"), "2026-09-29T13:30:00.000Z");
+// Awake all day and the job silent: the due run 90 awake minutes back is judged.
+assert.equal(awakeDue("2026-09-29T12:00:00Z"), "2026-09-29T10:30:00.000Z");
+// Asleep for 9 days: nothing inside the window qualifies, so nothing is judged.
+assert.equal(awakeDue("2026-10-08T12:00:00Z", []), null);
 
 console.log("schedule: all checks passed");
