@@ -20,7 +20,8 @@ interface VercelDeployment {
  */
 export async function probeVercel(
   config: Record<string, unknown>,
-  sinceMs: number
+  sinceMs: number,
+  untilMs = Infinity
 ): Promise<ProbeResult> {
   const prodUrl = str(config.prodUrl);
   const projectId = str(config.projectId);
@@ -61,7 +62,7 @@ export async function probeVercel(
     const deployments = body?.deployments ?? [];
 
     for (const d of deployments) {
-      if (typeof d.created !== "number" || d.created < sinceMs) continue;
+      if (typeof d.created !== "number" || d.created < sinceMs || d.created >= untilMs) continue;
       ran += 1;
       const state = (d.readyState ?? d.state ?? "").toUpperCase();
       if (state === "ERROR" || state === "CANCELED") failed += 1;

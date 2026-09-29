@@ -16,6 +16,12 @@ export interface Agent {
   expected_every_min: number | null;
   paused: boolean;
   sort_order: number;
+  /** push agents: 5-field cron in schedule_tz; the tick opens a 'late' incident when a due run has no signal after grace_min */
+  schedule_cron: string | null;
+  schedule_tz: string;
+  grace_min: number;
+  /** last heartbeat, ok or fail ping */
+  last_signal_at: string | null;
 }
 
 export interface Tick {

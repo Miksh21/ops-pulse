@@ -1,16 +1,37 @@
-import type { ProbeResult } from "@/lib/types";
+import type { Agent, ProbeResult } from "@/lib/types";
 import { timedFetch, parseJson, secret, str } from "./fetchers";
+
+const baseOf = (config: Record<string, unknown>) => str(config.baseUrl)?.replace(/\/+$/, "");
+
+/**
+ * workflowIds that have their own agent, per n8n base URL. The instance-level
+ * agent skips them, so one failure opens one incident, while workflows nobody
+ * registered stay covered. Paused agents still count: pausing one keeps it quiet.
+ */
+export function ownedWorkflows(agents: Agent[]): Map<string, Set<string>> {
+  const owned = new Map<string, Set<string>>();
+  for (const a of agents) {
+    const base = baseOf(a.config ?? {});
+    const workflowId = str(a.config?.workflowId);
+    if (a.probe !== "n8n" || !base || !workflowId) continue;
+    owned.set(base, (owned.get(base) ?? new Set()).add(workflowId));
+  }
+  return owned;
+}
 
 interface N8nExecution {
   id: string;
   status: string;
-  startedAt: string;
+  startedAt: string | null;
   stoppedAt: string | null;
   workflowId: string;
   finished: boolean;
 }
 
 const FAILURE_STATES = new Set(["error", "crashed", "canceled"]);
+// Not over yet: counted once, when they stop. A run that has merely started
+// must never pass for a clean run (that would close a failure incident).
+const PENDING_STATES = new Set(["new", "running", "waiting"]);
 
 /**
  * config: { baseUrl, apiKeyEnv, workflowId? }
@@ -23,9 +44,11 @@ const FAILURE_STATES = new Set(["error", "crashed", "canceled"]);
  */
 export async function probeN8n(
   config: Record<string, unknown>,
-  sinceMs: number
+  sinceMs: number,
+  owned: Map<string, Set<string>> = new Map(),
+  untilMs = Infinity
 ): Promise<ProbeResult> {
-  const baseUrl = str(config.baseUrl)?.replace(/\/+$/, "");
+  const baseUrl = baseOf(config);
   const apiKey = secret(config.apiKeyEnv);
   const workflowId = str(config.workflowId);
 
@@ -98,14 +121,31 @@ export async function probeN8n(
     return { ping_ok: false, latency_ms, message: "n8n API key rejected" };
   }
 
-  const rows = parseJson<{ data?: N8nExecution[] }>(ex.body)?.data ?? [];
+  // An answer we cannot read is a failed check, never "nothing ran".
+  const rows = ex.ok ? parseJson<{ data?: N8nExecution[] }>(ex.body)?.data : undefined;
+  if (!Array.isArray(rows)) {
+    return {
+      ping_ok: false,
+      latency_ms,
+      message: ex.ok
+        ? `executions response unreadable${ex.error ? ` (${ex.error})` : ""}`
+        : ex.error ?? `executions HTTP ${ex.status}`,
+    };
+  }
+
+  const skip = workflowId ? undefined : owned.get(baseUrl);
   let ran = 0;
   let failed = 0;
   for (const r of rows) {
-    const started = Date.parse(r.startedAt);
-    if (!Number.isFinite(started) || started < sinceMs) continue;
+    if (skip?.has(String(r.workflowId))) continue;
+    const status = (r.status ?? "").toLowerCase();
+    if (PENDING_STATES.has(status)) continue;
+    // Window on when the run ended, so a long run that fails after the
+    // window it started in still counts.
+    const at = Date.parse(r.stoppedAt ?? r.startedAt ?? "");
+    if (!Number.isFinite(at) || at < sinceMs || at >= untilMs) continue;
     ran += 1;
-    if (FAILURE_STATES.has((r.status ?? "").toLowerCase())) failed += 1;
+    if (FAILURE_STATES.has(status)) failed += 1;
   }
 
   if (failed > 0) {

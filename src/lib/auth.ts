@@ -1,4 +1,5 @@
 import { timingSafeEqual } from "crypto";
+import { NextResponse } from "next/server";
 
 /** Constant-time compare so a wrong secret cannot be brute-forced by timing. */
 export function secretMatches(provided: string | null, expected: string | undefined): boolean {
@@ -28,4 +29,19 @@ export function isAuthorized(req: Request): boolean {
   }
 
   return secretMatches(url.searchParams.get("secret"), expected);
+}
+
+/**
+ * The external dispatcher gets its own key, so that machine never holds the
+ * tick secret: header only (a query string lands in logs), closed until the
+ * key is configured. Returns the refusal to send, or null when allowed.
+ */
+export function dispatchDenied(req: Request): NextResponse | null {
+  const expected = process.env.OPS_DISPATCH_SECRET;
+  if (!expected) {
+    return NextResponse.json({ error: "OPS_DISPATCH_SECRET is not configured" }, { status: 503 });
+  }
+  return secretMatches(req.headers.get("x-ops-dispatch"), expected)
+    ? null
+    : NextResponse.json({ error: "unauthorized" }, { status: 401 });
 }

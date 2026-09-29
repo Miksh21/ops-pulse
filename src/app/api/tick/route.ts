@@ -2,7 +2,9 @@ import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { bucketOf } from "@/lib/buckets";
 import { runProbe } from "@/lib/probes";
+import { ownedWorkflows } from "@/lib/probes/n8n";
 import { isAuthorized } from "@/lib/auth";
+import { evaluateIncidents } from "@/lib/incidents";
 import type { Agent, ProbeResult } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -38,16 +40,21 @@ async function handle(req: Request) {
   const started = Date.now();
   const bucket = bucketOf(started);
 
-  const agents = await query<Agent>(
+  // Paused agents are loaded only so their workflows stay registered: the
+  // instance-level n8n agent skips every workflow that has its own agent.
+  const pull = await query<Agent>(
     `select id, slug, name, project, platform, kind, probe, config,
-            ping_token, expected_every_min, paused, sort_order
+            ping_token, expected_every_min, paused, sort_order,
+            schedule_cron, schedule_tz, grace_min, last_signal_at
        from ops.agents
-      where paused = false and kind = 'pull'
+      where kind = 'pull'
       order by sort_order asc`
   );
+  const owned = ownedWorkflows(pull);
+  const agents = pull.filter((a) => !a.paused);
 
   const results = await mapLimit(agents, CONCURRENCY, async (agent) => {
-    const result = await runProbe(agent, started);
+    const result = await runProbe(agent, started, owned);
     return { agent, result };
   });
 
@@ -56,6 +63,11 @@ async function handle(req: Request) {
     await writeTicks(bucket, results);
     await writeEvents(results);
   }
+
+  // Before driver_runs on purpose: if incident handling breaks, the tick is
+  // not recorded, so the dashboard and the dispatcher see a stalled driver
+  // instead of a quietly healthy one. Its time is inside duration_ms.
+  await evaluateIncidents(bucket, results, started);
 
   const ok = results.filter((r) => r.result.ping_ok).length;
   const duration = Date.now() - started;

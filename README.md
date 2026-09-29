@@ -62,8 +62,8 @@ row reveals what is monitored, not how to reach it.
 One failed probe is usually a blip. Calling that "down" trains you to ignore the
 dashboard, which is the only failure mode that really matters.
 
-- **down** — two consecutive failed checks, or a push agent silent for more than 2× its expected interval
-- **degraded** — the latest check failed but the previous passed, or a run failed in the window
+- **down** — an open incident (a failed run, two consecutive failed checks, a scheduled push agent that missed its run), red until the incident closes; or an unscheduled push agent silent for more than 2× its expected interval
+- **degraded** — the latest check failed but the previous passed
 - **operational** — everything else that has reported
 - **unknown** — no data, or data older than 4 ticks (stale never renders green)
 
@@ -78,8 +78,10 @@ Open once with `?k=<OPS_DASHBOARD_KEY>` — the key is stored in an httpOnly
 cookie and stripped from the URL, so it never lingers in history or a screenshot.
 Afterwards the bare URL works for 90 days.
 
-Not gated: `/api/tick` (own secret) and `/api/ping/*` (token in the URL; a cron
-job cannot hold a browser cookie).
+Not gated: `/api/tick` (own secret), `/api/ping/*` (token in the URL; a cron
+job cannot hold a browser cookie) and `/api/incidents` (header `x-ops-dispatch`
+= `OPS_DISPATCH_SECRET`, for the external dispatcher: `GET` lists open incidents
+without a diagnosis, `POST /api/incidents/<id>` writes one).
 
 ---
 
@@ -108,6 +110,8 @@ curl -X POST -H "x-ops-secret: $OPS_TICK_SECRET" "http://localhost:3000/api/tick
 | `DIRECT_DATABASE_URL` | Supabase **session** pooler (`:5432`) — migrations only, local |
 | `OPS_DASHBOARD_KEY` | Gate for the UI and write APIs |
 | `OPS_TICK_SECRET` | Gate for `/api/tick`; also lives in the n8n credential |
+| `OPS_DISPATCH_SECRET` | Gate for `/api/incidents` (external dispatcher); unset = 503 |
+| `NTFY_URL`, `NTFY_TOKEN` | Full ntfy topic URL and its Bearer token for incident pushes; while unset or down, pushes are retried every tick (one `push_failed` event per incident per hour) |
 | `VERCEL_API_TOKEN`, `N8N_API_KEY`, `SUPABASE_ANON_KEY`, `LEMLIST_API_KEY`, … | Probe credentials. Each agent names the var it reads, so add one per instance you monitor. |
 | `NEXT_PUBLIC_OPS_TZ` | Display timezone, default `Europe/Prague` |
 

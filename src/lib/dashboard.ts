@@ -14,10 +14,11 @@ export async function loadDashboard(): Promise<DashboardPayload> {
   const buckets = recentBuckets(WINDOW_BUCKETS);
   const windowStart = buckets[0];
 
-  const [agents, ticks, events, driver] = await Promise.all([
+  const [agents, ticks, events, driver, incidents] = await Promise.all([
     query<Agent>(
       `select id, slug, name, project, platform, kind, probe, config,
-              ping_token, expected_every_min, paused, sort_order
+              ping_token, expected_every_min, paused, sort_order,
+              schedule_cron, schedule_tz, grace_min, last_signal_at
          from ops.agents
         order by sort_order asc, name asc`
     ),
@@ -40,7 +41,11 @@ export async function loadDashboard(): Promise<DashboardPayload> {
     query<{ at: string }>(
       `select at from ops.driver_runs order by at desc limit 1`
     ),
+    query<{ agent_id: string }>(
+      `select agent_id from ops.incidents where closed_at is null`
+    ),
   ]);
+  const withOpenIncident = new Set(incidents.map((i) => i.agent_id));
 
   const ticksByAgent = new Map<string, Tick[]>();
   for (const t of ticks) {
@@ -76,14 +81,16 @@ export async function loadDashboard(): Promise<DashboardPayload> {
       .reverse()
       .find((t) => t.ping_ok !== null);
     const lastRun = [...agentTicks].reverse().find((t) => t.ran > 0);
-    const lastSignal = agentEvents[0]?.at ?? null;
+    // The column, not the newest event: events include the tick's own
+    // incident notes and are pruned after 3 days.
+    const lastSignal = agent.last_signal_at ? new Date(agent.last_signal_at).toISOString() : null;
 
     return {
       ...agent,
       config: sanitizeConfig(agent.config),
       ticks: agentTicks,
       events: agentEvents,
-      health: computeHealth(agent, agentTicks, lastSignal, now),
+      health: computeHealth(agent, agentTicks, lastSignal, withOpenIncident.has(agent.id), now),
       last_ping_at: lastPing?.bucket ?? null,
       last_run_at: lastRun?.bucket ?? null,
       success_rate: successRate(agentTicks),
@@ -113,7 +120,7 @@ export async function loadDashboard(): Promise<DashboardPayload> {
  * checked. Only env-var *names* live in there by design, but strip anything
  * that looks like a literal credential in case an agent was added by hand.
  */
-function sanitizeConfig(config: Record<string, unknown>): Record<string, unknown> {
+export function sanitizeConfig(config: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(config ?? {})) {
     if (/key|token|secret|password/i.test(k) && !/env$/i.test(k)) {

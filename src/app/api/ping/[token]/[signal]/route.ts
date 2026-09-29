@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { query, queryOne } from "@/lib/db";
 import { bucketOf } from "@/lib/buckets";
+import { closeIncidents, openIncidents } from "@/lib/incidents";
 
 export const dynamic = "force-dynamic";
 
@@ -93,6 +94,20 @@ async function handle(
     `insert into ops.events (agent_id, kind, message) values ($1,$2,$3)`,
     [agent.id, kind, message]
   );
+
+  // "start" says a run began, not how it went: it is no signal for lateness.
+  if (signal !== "start") {
+    await query(`update ops.agents set last_signal_at = now() where id = $1`, [agent.id]);
+    // Any signal ends lateness; ok also ends a failure; fail opens one.
+    await closeIncidents(
+      signal === "ok"
+        ? [{ agentId: agent.id, kind: "late" }, { agentId: agent.id, kind: "failure" }]
+        : [{ agentId: agent.id, kind: "late" }]
+    );
+    if (signal === "fail") {
+      await openIncidents([{ agentId: agent.id, kind: "failure", reason: message ?? "Run failed" }]);
+    }
+  }
 
   return NextResponse.json({ ok: true, agent: agent.slug, signal, bucket: bucket.toISOString() });
 }

@@ -2,19 +2,25 @@ import type { Agent, ProbeResult } from "@/lib/types";
 import { probeVercel } from "./vercel";
 import { probeN8n } from "./n8n";
 import { probeSupabase, probeLemlist, probeHttp } from "./misc";
-import { BUCKET_MINUTES } from "@/lib/buckets";
+import { BUCKET_MINUTES, bucketOf } from "@/lib/buckets";
 
-export async function runProbe(agent: Agent, now = Date.now()): Promise<ProbeResult> {
-  // Everything that happened since the previous tick belongs to this bucket.
-  const sinceMs = now - BUCKET_MINUTES * 60_000;
+export async function runProbe(
+  agent: Agent,
+  now = Date.now(),
+  ownedWorkflows: Map<string, Set<string>> = new Map()
+): Promise<ProbeResult> {
+  // The previous whole bucket: every run lands in exactly one tick however
+  // early or late the driver fires (a sliding "now minus 5 min" left gaps).
+  const untilMs = bucketOf(now).getTime();
+  const sinceMs = untilMs - BUCKET_MINUTES * 60_000;
   const config = agent.config ?? {};
 
   try {
     switch (agent.probe) {
       case "vercel":
-        return await probeVercel(config, sinceMs);
+        return await probeVercel(config, sinceMs, untilMs);
       case "n8n":
-        return await probeN8n(config, sinceMs);
+        return await probeN8n(config, sinceMs, ownedWorkflows, untilMs);
       case "supabase":
         return await probeSupabase(config);
       case "lemlist":

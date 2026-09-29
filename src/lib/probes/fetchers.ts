@@ -3,6 +3,10 @@
 
 export const PROBE_TIMEOUT_MS = 8_000;
 
+/** Parse input cap. A larger body is dropped whole, never cut: a cut JSON body
+ *  fails to parse, and the n8n probe used to read that as "nothing ran". */
+const MAX_BODY_CHARS = 2_000_000;
+
 export interface TimedResponse {
   ok: boolean;
   status: number;
@@ -29,11 +33,12 @@ export async function timedFetch(
         ...(init.headers ?? {}),
       },
     });
-    // Read at most a slice of the body — health endpoints are small and we
-    // never want a large payload to dominate the tick.
     let body: string | null = null;
+    let error: string | undefined;
     try {
-      body = (await res.text()).slice(0, 20_000);
+      const text = await res.text();
+      if (text.length <= MAX_BODY_CHARS) body = text;
+      else error = "response body over 2 MB";
     } catch {
       body = null;
     }
@@ -42,6 +47,7 @@ export async function timedFetch(
       status: res.status,
       latency_ms: Date.now() - started,
       body,
+      error,
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
