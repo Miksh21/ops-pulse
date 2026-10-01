@@ -10,6 +10,7 @@ export async function publish(msg: {
   body: string;
   priority: 4 | 5;
   tags: string;
+  click?: string; // a link the push opens when tapped (e.g. a claude:// session link)
 }): Promise<string | null> {
   const url = process.env.NTFY_URL;
   const token = process.env.NTFY_TOKEN;
@@ -23,6 +24,7 @@ export async function publish(msg: {
       title: msg.title.replace(/[^\x20-\x7e]/g, "?"),
       priority: String(msg.priority),
       tags: msg.tags,
+      ...(msg.click ? { click: msg.click } : {}),
     },
     body: msg.body.slice(0, 3_500),
   });
