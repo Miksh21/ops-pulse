@@ -1,3 +1,4 @@
+import { SUPABASE_CA } from "./supabase-ca";
 import { Pool } from "pg";
 
 // Supabase transaction pooler (port 6543) is the right endpoint for serverless:
@@ -20,8 +21,8 @@ function createPool(): Pool {
   }
   return new Pool({
     connectionString,
-    // Supabase's pooler presents a cert chain Node does not ship a root for.
-    ssl: { rejectUnauthorized: false },
+    // verify against Supabase's root CA (Node ships no root for the pooler chain)
+    ssl: { rejectUnauthorized: true, ca: SUPABASE_CA },
     max: 3,
     idleTimeoutMillis: 10_000,
     connectionTimeoutMillis: 10_000,

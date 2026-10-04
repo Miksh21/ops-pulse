@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
@@ -21,7 +22,7 @@ export async function seedAgents(agents) {
     process.exit(1);
   }
 
-  const client = new pg.Client({ connectionString, ssl: { rejectUnauthorized: false } });
+  const client = new pg.Client({ connectionString, ssl: { rejectUnauthorized: true, ca: readFileSync(new URL("../../certs/supabase-prod-ca-2021.crt", import.meta.url), "utf8") } });
   await client.connect();
 
   for (const a of agents) {

@@ -17,7 +17,7 @@ if (!connectionString) {
   process.exit(1);
 }
 
-const client = new pg.Client({ connectionString, ssl: { rejectUnauthorized: false } });
+const client = new pg.Client({ connectionString, ssl: { rejectUnauthorized: true, ca: readFileSync(new URL("../certs/supabase-prod-ca-2021.crt", import.meta.url), "utf8") } });
 await client.connect();
 
 for (const file of readdirSync(sqlDir).filter((f) => f.endsWith(".sql")).sort()) {

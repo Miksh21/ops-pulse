@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 // Level 1 digest for Jan's 08:00 briefing (digital footprint Step 1): incidents still
 // open, and those resolved since the previous workday 08:00 Prague (Monday looks back
 // to Friday). Read-only. Run: node scripts/incidents-digest.mjs
@@ -8,7 +9,7 @@ import { fileURLToPath } from "node:url";
 
 loadEnv({ path: join(dirname(fileURLToPath(import.meta.url)), "..", ".env.local"), quiet: true });
 
-const client = new pg.Client({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
+const client = new pg.Client({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: true, ca: readFileSync(new URL("../certs/supabase-prod-ca-2021.crt", import.meta.url), "utf8") } });
 await client.connect();
 await client.query("begin read only");
 const { rows } = await client.query(`
